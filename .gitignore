@@ -1,0 +1,23 @@
+# Node
+node_modules/
+**/node_modules/
+
+# Expo / Metro
+.expo/
+**/.expo/
+expo-env.d.ts
+
+# Env files
+.env
+.env.*
+apps/mobile/.env.local
+
+# Build output
+.DS_Store
+/dist
+/web-build
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

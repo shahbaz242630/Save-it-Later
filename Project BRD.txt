@@ -1,0 +1,773 @@
+# Save-It-Later – Business Requirements Document (BRD)
+
+## 1. Overview
+
+### 1.1 Product Summary
+
+Save-It-Later is a cross-platform bookmarking app that allows users to save links, posts, and content from any app (browser, social media, messaging, etc.) into a single, organized inbox. Users can:
+
+* Save content via the system Share menu on iOS and Android
+* Add tags and notes
+* View, search, and filter saved items
+* Access their saved items on mobile (iPhone, iPad, Android) and later via web (future phase)
+
+Target platforms:
+
+* iOS (iPhone + iPad)
+* Android phones and tablets
+* Future: Web (React Native Web)
+
+Primary audience:
+
+* Knowledge workers, students, content-heavy users who frequently discover content they want to revisit later.
+
+### 1.2 Goals
+
+* Provide a **one-tap** way to save any URL/content from any app.
+* Centralize all saved items in a clean, searchable list.
+* Provide simple tagging and organization without complexity.
+* Build on a stack that you (the founder) can manage with AI assistance (Expo, React Native, Supabase).
+
+### 1.3 Non-Goals
+
+* No heavy AI features (summaries, auto-tagging) in v1.
+* No browser extension in v1.
+* No offline-first sync conflict resolution logic; simple online usage is enough.
+
+---
+
+## 2. User Stories & Use Cases
+
+### 2.1 Core User Stories
+
+1. **Save from any app**
+
+   * As a user, I want to save a link from Safari/Chrome/YouTube/Reddit/etc. using the Share menu so I don’t have to copy-paste into notes or email.
+
+2. **View all saved items in one list**
+
+   * As a user, I want to see a chronological list of everything I’ve saved, so I can easily revisit my content later.
+
+3. **Organize with tags**
+
+   * As a user, I want to add tags (like `work`, `ideas`, `videos`, `recipes`) so I can group and filter my saved items.
+
+4. **Search**
+
+   * As a user, I want to search my saved items by title, URL, or notes so I can quickly find a specific item.
+
+5. **Archive items**
+
+   * As a user, I want to archive saved items that I’ve already read/watched so I keep my main view clean.
+
+6. **Mark favorites**
+
+   * As a user, I want to favorite certain items so they are easy to access later.
+
+### 2.2 Secondary User Stories (Future)
+
+* Save screenshots or media files.
+* AI summaries of articles.
+* Browser extension for desktop.
+* Collections/folders for sharing.
+
+---
+
+## 3. Functional Requirements
+
+### 3.1 Authentication
+
+* Users can sign up and log in via:
+
+  * Email + password (initial release)
+* Session persists on device until logout.
+
+### 3.2 Save Items
+
+* User can:
+
+  * Save a URL from within the app via a `+` button (manual entry).
+  * Save a URL via system Share menu from other apps.
+* Each saved item stores:
+
+  * URL
+  * Optional title
+  * Optional notes
+  * Optional tags
+  * Source app (if provided by OS or share payload)
+  * Created date/time
+
+### 3.3 Tag Management
+
+* Users can create tags on the fly when saving or editing an item.
+* Users can see a list of their tags in a tags screen.
+* Users can filter items by tag.
+
+### 3.4 Item List & Detail
+
+* Main screen shows list of saved items:
+
+  * Sorted by created date (newest first)
+  * Shows title (or URL if no title), favicon/indicator, tags, creation date.
+* Tapping an item opens a detail screen:
+
+  * Full URL
+  * Notes
+  * Tags
+  * Buttons: Open Link, Edit, Favorite/Unfavorite, Archive/Unarchive.
+
+### 3.5 Search
+
+* Search input filters saved items by:
+
+  * Title
+  * URL
+  * Notes
+
+### 3.6 Archive & Favorites
+
+* Users can archive an item; archived items are hidden from main list by default.
+* Users can toggle a filter to view archived items.
+* Users can mark an item as favorite; favorites can be filtered via a toggle.
+
+---
+
+## 4. Non-Functional Requirements
+
+### 4.1 Performance
+
+* App should load main list within 1–2 seconds on normal connection.
+* Pagination or infinite scroll used for large lists.
+
+### 4.2 Security
+
+* Use Supabase auth and RLS so users can only see their own data.
+* All API calls must be authenticated.
+* Tokens stored securely on device.
+
+### 4.3 Scalability
+
+* Supabase/Postgres can support early scale.
+* Indexes on main query fields (user_id, created_at, title, URL).
+
+### 4.4 Compatibility
+
+* iOS (latest 2 major versions), iPadOS, Android (API 24+ recommended).
+* Responsive layout that works on phone and tablet.
+
+---
+
+## 5. Primary User Flow: OS Share Sheet → Save-It-Later
+
+This is the main way users will save content into Save-It-Later.
+
+### 5.1 High-Level Behavior
+
+* In any app that supports sharing (YouTube, Instagram, Facebook, Reddit, X/Twitter, browsers, etc.), the user taps the **Share** button.
+* The system **Share sheet** opens.
+* **Save-It-Later** must appear in the list of target apps, alongside WhatsApp, Mail, Messages, etc.
+* When the user selects **Save-It-Later**, the app/extension receives the shared URL (and any available metadata like title/text).
+* The app then saves the content using one of two modes:
+
+  * **Quick Save mode (default for initial release):**
+
+    * Immediately save the link with minimal UI.
+    * Show a small confirmation (toast/notification) such as "Saved to Save-It-Later".
+  * **Enhanced Save mode (future option):**
+
+    * Show a lightweight screen to edit title, add notes, and pick tags before saving.
+
+### 5.2 iOS Specific Flow
+
+1. User taps **Share** in another app.
+2. System Share sheet appears; user taps **Save-It-Later**.
+3. iOS Share Extension for Save-It-Later receives the item (URL/text).
+4. Extension creates a saved item via Supabase/API using the existing logged-in session token.
+5. User sees a confirmation (within the extension or as in-app toast later).
+6. When the user opens the main Save-It-Later app, the new item appears at the top of the list.
+
+### 5.3 Android Specific Flow
+
+1. User taps **Share** in another app.
+2. Android share panel appears; user taps **Save-It-Later**.
+3. Save-It-Later is registered to handle `ACTION_SEND` with type `text/plain` (and similar types for URLs).
+4. The app (or a dedicated ShareHandlerScreen) parses the shared text to extract the URL.
+5. App creates a saved item via Supabase/API.
+6. Show a small in-app confirmation message.
+7. When the user opens the Home screen, the item is visible at the top.
+
+### 5.4 Authentication Requirements for Share Flow
+
+* If the user is already logged in, the Share flow must **not** ask them to log in again.
+* If the user is not logged in:
+
+  * Option 1 (simpler for initial release): Do not show Save-It-Later in the share sheet until a session exists.
+  * Option 2: When user selects Save-It-Later from share sheet, redirect them to a minimal login screen, then retry save.
+
+This section is the single source of truth for the core "Share → Save-It-Later" behavior. All implementation (iOS Share extension, Android share intents, and app navigation) must match this flow.
+
+## 6. Screen-by-Screen UX & Layout
+
+Use this as a spec for your designer/AI or direct implementation.
+
+### 5.1 Onboarding / Auth Flow
+
+**Screen: Welcome / Sign In**
+
+* Purpose: Let user sign in or sign up.
+* Components:
+
+  * App logo + name (top center).
+  * Short tagline: “Save everything you want to remember.”
+  * Email input field.
+  * Password input field.
+  * Button: `Sign In`.
+  * Link: `Don’t have an account? Sign Up`.
+* Actions:
+
+  * `Sign In` calls API `/auth/login` (Supabase signInWithPassword).
+  * If success → navigate to Main List screen.
+
+**Screen: Sign Up**
+
+* Components:
+
+  * Email
+  * Password
+  * Confirm Password
+  * Button: `Create Account`
+  * Link: `Already have an account? Sign In`
+* Actions:
+
+  * Create user in Supabase auth.
+  * On success → auto login → navigate to Main List.
+
+### 5.2 Main Tab Structure
+
+Use a bottom tab navigator with 3 tabs:
+
+1. **Home** – Saved Items list (default)
+2. **Tags** – List of tags and counts
+3. **Settings** – Account and preferences
+
+### 5.3 Home Screen – Saved Items List
+
+**Name:** `HomeScreen`
+
+**Layout:**
+
+* Header:
+
+  * Left: App name or logo.
+  * Right: Icon button for `Search` or a search bar that expands.
+* Below header:
+
+  * Horizontal filter chips:
+
+    * `All`
+    * `Favorites`
+    * `Archived` (or in a dropdown menu)
+  * Tag filter button (opens a tag filter modal).
+* Main content:
+
+  * FlatList of saved items.
+
+**Item card layout:**
+
+* Left: Favicon circle or first letter of domain.
+* Middle:
+
+  * Title (or URL if no title)
+  * Small subtext: domain + created date (e.g., `youtube.com • 2 days ago`).
+  * Tags displayed as small pills.
+* Right:
+
+  * Star icon (favorite toggle).
+  * More menu (3 dots) for quick actions (Archive, Edit, Delete).
+
+**Actions:**
+
+* Tap item → navigate to `ItemDetailScreen` with `item_id`.
+* Floating Action Button (FAB) in bottom-right:
+
+  * `+` icon → open `AddItemScreen` for manual URL entry.
+
+### 5.4 Add Item Screen (Manual)
+
+**Name:** `AddItemScreen`
+
+**Layout:**
+
+* Header:
+
+  * Title: `Save Link`
+  * Left: Back arrow.
+* Body:
+
+  * Text input: `URL` (required)
+  * Text input: `Title` (optional)
+  * Text area: `Notes` (optional)
+  * Tag selector:
+
+    * Existing tags as selectable chips
+    * `+ New Tag` input
+  * Button: `Save`
+
+**Behavior:**
+
+* Validate URL format.
+* On Save → call API `/items` (POST) → go back to Home and refresh list.
+
+### 5.5 Item Detail Screen
+
+**Name:** `ItemDetailScreen`
+
+**Layout:**
+
+* Header:
+
+  * Back arrow
+  * Trash icon (delete)
+* Body:
+
+  * Title (editable or read-only in v1)
+  * URL (tap to open in external browser)
+  * Notes (multi-line text, editable with `Edit` button)
+  * Tags section:
+
+    * Tag chips
+    * `Edit Tags` button (opens tag picker)
+  * Meta info:
+
+    * Source app (if stored)
+    * Created at
+  * Buttons:
+
+    * `Open Link`
+    * `Favorite` (toggle)
+    * `Archive` (toggle)
+
+### 5.6 Tags Screen
+
+**Name:** `TagsScreen`
+
+**Layout:**
+
+* Header: `Tags`
+* Body:
+
+  * List of tags with:
+
+    * Tag name
+    * Count of associated saved items
+  * `+ Add Tag` button (to create new tag)
+
+**Actions:**
+
+* Tap a tag → navigate to `TagItemsScreen` to show items with that tag.
+
+### 5.7 Tag Items Screen
+
+**Name:** `TagItemsScreen`
+
+Same layout as Home list, but filtered by selected tag.
+
+### 5.8 Settings Screen
+
+**Name:** `SettingsScreen`
+
+**Layout:**
+
+* Section: Account
+
+  * Email (read-only)
+  * Button: `Log out`
+* Section: App
+
+  * Dark mode toggle (optional initial release)
+  * About / Version
+
+---
+
+## 6. Supabase Schema (Exact)
+
+Below is a starting point schema. You can give this directly to Codex or run via SQL in Supabase.
+
+### 6.1 Tables
+
+#### Table: `profiles`
+
+Stores additional user profile data keyed by Supabase auth `user.id`.
+
+```sql
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text unique,
+  created_at timestamptz default now()
+);
+```
+
+#### Table: `saved_items`
+
+```sql
+create table if not exists public.saved_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  url text not null,
+  title text,
+  notes text,
+  source_app text,
+  is_favorite boolean default false,
+  is_archived boolean default false,
+  created_at timestamptz default now()
+);
+
+create index on public.saved_items (user_id, created_at desc);
+create index on public.saved_items using gin ((to_tsvector('english', coalesce(title,'') || ' ' || coalesce(notes,''))));
+```
+
+#### Table: `tags`
+
+```sql
+create table if not exists public.tags (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null,
+  created_at timestamptz default now(),
+  unique (user_id, name)
+);
+
+create index on public.tags (user_id);
+```
+
+#### Table: `saved_item_tags`
+
+```sql
+create table if not exists public.saved_item_tags (
+  saved_item_id uuid references public.saved_items(id) on delete cascade,
+  tag_id uuid references public.tags(id) on delete cascade,
+  primary key (saved_item_id, tag_id)
+);
+
+create index on public.saved_item_tags (tag_id);
+```
+
+### 6.2 Row Level Security (RLS)
+
+Enable RLS:
+
+```sql
+alter table public.profiles enable row level security;
+alter table public.saved_items enable row level security;
+alter table public.tags enable row level security;
+alter table public.saved_item_tags enable row level security;
+```
+
+Policies:
+
+```sql
+create policy "Profiles are viewable by owner" on public.profiles
+  for select using (auth.uid() = id);
+
+create policy "Profiles are insertable by owner" on public.profiles
+  for insert with check (auth.uid() = id);
+
+create policy "Items are viewable by owner" on public.saved_items
+  for select using (auth.uid() = user_id);
+
+create policy "Items are insertable by owner" on public.saved_items
+  for insert with check (auth.uid() = user_id);
+
+create policy "Items are updatable by owner" on public.saved_items
+  for update using (auth.uid() = user_id);
+
+create policy "Items are deletable by owner" on public.saved_items
+  for delete using (auth.uid() = user_id);
+
+create policy "Tags are viewable by owner" on public.tags
+  for select using (auth.uid() = user_id);
+
+create policy "Tags are insertable by owner" on public.tags
+  for insert with check (auth.uid() = user_id);
+
+create policy "Tags are updatable by owner" on public.tags
+  for update using (auth.uid() = user_id);
+
+create policy "Tags are deletable by owner" on public.tags
+  for delete using (auth.uid() = user_id);
+
+create policy "Saved_item_tags viewable by owner" on public.saved_item_tags
+  for select using (
+    exists (
+      select 1 from public.saved_items si
+      where si.id = saved_item_id and si.user_id = auth.uid()
+    )
+  );
+
+create policy "Saved_item_tags insertable by owner" on public.saved_item_tags
+  for insert with check (
+    exists (
+      select 1 from public.saved_items si
+      where si.id = saved_item_id and si.user_id = auth.uid()
+    ) and
+    exists (
+      select 1 from public.tags t
+      where t.id = tag_id and t.user_id = auth.uid()
+    )
+  );
+
+create policy "Saved_item_tags deletable by owner" on public.saved_item_tags
+  for delete using (
+    exists (
+      select 1 from public.saved_items si
+      where si.id = saved_item_id and si.user_id = auth.uid()
+    )
+  );
+```
+
+---
+
+## 7. API Contract (Assuming a Custom Backend Layer)
+
+> Note: With Supabase, you can call the database directly from the client, but here is an optional REST-style contract if you later want a Node backend.
+
+Base URL: `https://api.saveitlater.com/v1`
+
+### 7.1 Auth
+
+**POST** `/auth/signup`
+
+* Body:
+
+  * `email` (string)
+  * `password` (string)
+* Response:
+
+  * `user` object
+  * `access_token`
+
+**POST** `/auth/login`
+
+* Body:
+
+  * `email`
+  * `password`
+* Response:
+
+  * `user`
+  * `access_token`
+
+### 7.2 Items
+
+**GET** `/items`
+
+* Query params:
+
+  * `search` (optional)
+  * `tag` (optional)
+  * `favorite` (optional boolean)
+  * `archived` (optional boolean)
+  * `limit` (optional, default 20)
+  * `offset` (optional)
+* Response: array of saved items.
+
+**POST** `/items`
+
+* Used by app and share extension.
+* Body:
+
+  * `url` (string, required)
+  * `title` (string, optional)
+  * `notes` (string, optional)
+  * `tag_names` (array of strings, optional)
+  * `source_app` (string, optional)
+* Response:
+
+  * Created item object.
+
+**GET** `/items/{id}`
+
+* Response: item object.
+
+**PATCH** `/items/{id}`
+
+* Body (any subset):
+
+  * `title`
+  * `notes`
+  * `is_favorite`
+  * `is_archived`
+  * `tag_names` (replace existing tag associations)
+* Response: updated item.
+
+**DELETE** `/items/{id}`
+
+* Response: 204 No Content.
+
+### 7.3 Tags
+
+**GET** `/tags`
+
+* Response: array of tags with counts.
+
+**POST** `/tags`
+
+* Body:
+
+  * `name` (string)
+* Response:
+
+  * Tag object.
+
+**DELETE** `/tags/{id}`
+
+* Behavior: remove tag and associations for that user.
+
+---
+
+## 8. Expo React Native Project Structure
+
+Project name (example): `save-it-later`
+
+### 8.1 File/Folder Structure
+
+```text
+save-it-later/
+  app/
+    _layout.tsx              # Expo Router root layout
+    index.tsx                # Entry screen (auth gate)
+    (auth)/
+      login.tsx
+      signup.tsx
+    (tabs)/
+      _layout.tsx            # Tab navigator: Home, Tags, Settings
+      home.tsx               # HomeScreen – main items list
+      tags.tsx               # TagsScreen
+      settings.tsx           # SettingsScreen
+    item/
+      [id].tsx               # ItemDetailScreen
+    tag/
+      [id].tsx               # TagItemsScreen
+    add-item.tsx             # AddItemScreen
+
+  src/
+    components/
+      ItemCard.tsx
+      TagChip.tsx
+      TextInput.tsx
+      Button.tsx
+      EmptyState.tsx
+    hooks/
+      useAuth.ts
+      useItems.ts
+      useTags.ts
+    lib/
+      supabase.ts            # Supabase client config
+      api.ts                 # If using backend API layer
+    store/
+      authStore.ts           # Zustand or context for auth state
+      uiStore.ts             # Filters, theme, etc.
+    types/
+      index.ts               # TypeScript types (Item, Tag, User)
+
+  assets/
+    icon.png
+    splash.png
+
+  app.json / app.config.ts   # Expo config
+  package.json
+  tsconfig.json
+  babel.config.js
+```
+
+### 8.2 Key Modules
+
+* `supabase.ts`
+
+  * Initialize Supabase client with `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+* `useAuth.ts`
+
+  * Hooks for signIn, signUp, signOut.
+  * Subscribes to auth state changes.
+* `useItems.ts`
+
+  * Functions: `fetchItems`, `createItem`, `updateItem`, `deleteItem`.
+* `useTags.ts`
+
+  * Functions: `fetchTags`, `createTag`.
+
+---
+
+## 9. Share Extension (High-Level Spec)
+
+> Implementation of the share extension is platform-specific and may need native modules or Expo Router + Intent handling. For BRD, we define behavior.
+
+### 9.1 iOS Share Extension (Concept)
+
+* When user taps `Share` in another app and selects `Save-It-Later`:
+
+  * Extension receives a URL.
+  * User sees a minimal UI:
+
+    * Optional: title field
+    * Optional: notes field
+    * Optional: quick tag selector
+    * Button: `Save`
+  * On Save:
+
+    * Extension calls `POST /items` with URL and metadata using a stored token.
+
+### 9.2 Android Share Intent
+
+* App is registered as a target for `ACTION_SEND` with MIME type `text/*` or `text/plain`.
+* When user shares a URL from any app:
+
+  * Android launches Save-It-Later.
+  * `ShareHandlerScreen` reads intent extras (subject/text) and parses URL.
+  * Shows mini screen with parsed URL, title, tags.
+  * On save → writes to Supabase and redirects user to Home list.
+
+---
+
+## 10. Phased Roadmap (initial release First)
+
+### Initial Release
+
+* Auth (email/password)
+* Supabase schema + RLS
+* Home list screen
+* Add item (manual)
+* Item detail (open in browser, notes, tags)
+* Basic tags screen
+* Basic search
+* Android Share integration (simplest target)
+
+### Phase 2 – UX & iOS
+
+* iOS Share extension / integration
+* Better item cards (favicon, domain extract)
+* Tag management improvements
+* Archive/favorites filters
+
+### Phase 3 – Enhancements
+
+* Browser extension (Chrome)
+* Web dashboard
+* AI-powered features (summaries, auto-tags)
+* Pro subscription (Stripe integration)
+
+---
+
+## 11. Acceptance Criteria (initial release)
+
+1. A new user can sign up, log in, and reach an empty Home list.
+2. The user can manually add a URL from inside the app.
+3. The new item appears in the Home list with the correct title/url.
+4. The user can add tags and see them displayed on the item.
+5. The user can search and see filtered results.
+6. The user can open the URL in the system browser from the detail screen.
+7. The user can archive an item and it no longer appears in the default Home view.
+8. On Android, the user can use the system Share action from another app to save a URL into Save-It-Later.
+9. All data is scoped per user: users cannot see each other’s items or tags.
+
+ generate the full project structure, Supabase setup, and screen implementations for the Save-It-Later app using Expo + React Native.
