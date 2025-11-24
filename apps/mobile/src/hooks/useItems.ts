@@ -154,6 +154,24 @@ export function useItems(options: UseItemsOptions = {}) {
     }
   }, [autoFetch, fetchItems]);
 
+  useEffect(() => {
+    if (!autoFetch || !session) return;
+    const channel = supabase
+      .channel(`saved_items_${session.user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'saved_items', filter: `user_id=eq.${session.user.id}` },
+        () => {
+          fetchItems();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [autoFetch, fetchItems, session]);
+
   const createItem = useCallback(
     async (payload: SavedItemInput) => {
       if (!session) return;
