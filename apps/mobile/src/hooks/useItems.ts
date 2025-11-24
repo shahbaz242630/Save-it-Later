@@ -175,14 +175,15 @@ export function useItems(options: UseItemsOptions = {}) {
   const createItem = useCallback(
     async (payload: SavedItemInput) => {
       if (!session) return;
+      const { tag_names: tagNames, ...rest } = payload;
       const { data, error } = await supabase
         .from('saved_items')
-        .insert({ ...payload, user_id: session.user.id })
+        .insert({ ...rest, user_id: session.user.id })
         .select('*')
         .single();
 
       if (error) throw error;
-      await syncItemTags(data.id, payload.tag_names);
+      await syncItemTags(data.id, tagNames);
       await fetchItems();
     },
     [fetchItems, session, syncItemTags]
@@ -190,14 +191,15 @@ export function useItems(options: UseItemsOptions = {}) {
 
   const updateItem = useCallback(
     async (itemId: string, updates: UpdateSavedItemInput) => {
+      const { tag_names: tagNames, ...rest } = updates;
       const { error } = await supabase
         .from('saved_items')
-        .update(updates)
+        .update(rest)
         .eq('id', itemId);
 
       if (error) throw error;
-      if (updates.tag_names) {
-        await syncItemTags(itemId, updates.tag_names);
+      if (tagNames) {
+        await syncItemTags(itemId, tagNames);
       }
       await fetchItems();
     },
