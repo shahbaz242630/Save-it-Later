@@ -100,6 +100,12 @@ export default function ItemDetailScreen() {
       <Text style={styles.url} onPress={() => Linking.openURL(item.url)}>
         {item.url}
       </Text>
+      <Button
+        label="Edit"
+        variant="secondary"
+        onPress={() => router.push({ pathname: '/item/[id]/edit', params: { id: item.id } })}
+        style={{ marginBottom: 16 }}
+      />
       <View style={styles.actionsRow}>
         <Button
           label={item.is_favorite ? 'Unfavorite' : 'Favorite'}

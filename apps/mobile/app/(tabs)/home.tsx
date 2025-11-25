@@ -34,11 +34,17 @@ export default function HomeScreen() {
   const setSelectedTag = useUiStore((s) => s.setSelectedTag);
   const setPrimaryFilter = useUiStore((s) => s.setPrimaryFilter);
 
-  const { items, loading, refetch, toggleFavorite, toggleArchive } = useItems({
+  const { items, loading, loadingMore, refreshing, hasMore, refetch, loadMore, toggleFavorite, toggleArchive } = useItems({
     search,
     tagId: selectedTagId,
     primaryFilter,
   });
+
+  const handleLoadMore = useCallback(() => {
+    if (hasMore && !loadingMore) {
+      loadMore();
+    }
+  }, [hasMore, loadMore, loadingMore]);
 
   useFocusEffect(
     useCallback(() => {
@@ -116,6 +122,10 @@ export default function HomeScreen() {
           data={items}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          refreshing={refreshing}
+          onRefresh={refetch}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
           renderItem={({ item }) => (
             <ItemCard
               item={item}
@@ -125,6 +135,13 @@ export default function HomeScreen() {
             />
           )}
           ListEmptyComponent={emptyState}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" />
+              </View>
+            ) : null
+          }
         />
       )}
       <Pressable style={styles.fab} onPress={() => router.push('/add-item')}>
@@ -177,6 +194,9 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 120,
+  },
+  footerLoader: {
+    paddingVertical: 16,
   },
   fab: {
     position: 'absolute',

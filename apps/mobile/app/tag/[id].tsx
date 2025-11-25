@@ -12,7 +12,17 @@ export default function TagItemsScreen() {
   const tagId = params.id as string;
   const [tagName, setTagName] = useState<string>('');
   const navigation = useNavigation();
-  const { items, loading, refetch, toggleArchive, toggleFavorite } = useItems({ tagId });
+  const {
+    items,
+    loading,
+    loadingMore,
+    refreshing,
+    hasMore,
+    refetch,
+    loadMore,
+    toggleArchive,
+    toggleFavorite,
+  } = useItems({ tagId });
 
   const loadTag = useCallback(async () => {
     if (!tagId) return;
@@ -52,6 +62,14 @@ export default function TagItemsScreen() {
         <FlatList
           data={items}
           keyExtractor={(item) => item.id}
+          refreshing={refreshing}
+          onRefresh={refetch}
+          onEndReached={() => {
+            if (hasMore && !loadingMore) {
+              loadMore();
+            }
+          }}
+          onEndReachedThreshold={0.5}
           renderItem={({ item }) => (
             <ItemCard
               item={item}
@@ -61,6 +79,13 @@ export default function TagItemsScreen() {
             />
           )}
           ListEmptyComponent={<Text>No items with this tag yet.</Text>}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 12 }}>
+                <ActivityIndicator size="small" />
+              </View>
+            ) : null
+          }
         />
       )}
     </SafeAreaView>

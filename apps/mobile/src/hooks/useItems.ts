@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { SavedItem, SavedItemInput, Tag, UpdateSavedItemInput } from '@/types';
 import { useAuthStore } from '@/store/authStore';
@@ -9,6 +9,8 @@ interface UseItemsOptions {
   primaryFilter?: 'all' | 'favorites' | 'archived';
   autoFetch?: boolean;
 }
+
+const PAGE_SIZE = 20;
 
 const buildSearchFilter = (search?: string) => {
   if (!search) return undefined;
@@ -23,8 +25,8 @@ const normalizeTagNames = (tagNames?: string[]) => {
       tagNames
         .map((tag) => tag.trim())
         .filter(Boolean)
-        .map((name) => name.toLowerCase())
-    )
+        .map((name) => name.toLowerCase()),
+    ),
   );
 };
 
@@ -33,7 +35,11 @@ export function useItems(options: UseItemsOptions = {}) {
   const session = useAuthStore((state) => state.session);
   const [items, setItems] = useState<SavedItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
 
   const ensureTags = useCallback(
     async (tagNames?: string[]) => {
@@ -50,9 +56,7 @@ export function useItems(options: UseItemsOptions = {}) {
 
       if (existingError) throw existingError;
 
-      const missing = normalized.filter(
-        (name) => !existing?.some((tag) => tag.name.toLowerCase() === name)
-      );
+      const missing = normalized.filter((name) => !existing?.some((tag) => tag.name.toLowerCase() === name));
 
       let inserted: Tag[] = [];
       if (missing.length) {
@@ -67,7 +71,7 @@ export function useItems(options: UseItemsOptions = {}) {
 
       return [...(existing ?? []), ...inserted];
     },
-    [session]
+    [session],
   );
 
   const syncItemTags = useCallback(
@@ -80,15 +84,12 @@ export function useItems(options: UseItemsOptions = {}) {
       const { error } = await supabase.from('saved_item_tags').insert(rows);
       if (error) throw error;
     },
-    [ensureTags, session]
+    [ensureTags, session],
   );
 
-  const fetchItems = useCallback(async () => {
-    if (!session) return;
-    setLoading(true);
-    setError(null);
-
-    try {
+  const querySavedItems = useCallback(
+    async (from: number, to: number) => {
+      if (!session) return [];
       let query = supabase
         .from('saved_items')
         .select('*, saved_item_tags(tag:tags(*))')
@@ -117,42 +118,86 @@ export function useItems(options: UseItemsOptions = {}) {
           .from('saved_item_tags')
           .select('saved_item_id')
           .eq('tag_id', tagId);
-
         if (tagError) throw tagError;
         const ids = tagItems?.map((row) => row.saved_item_id) ?? [];
         if (!ids.length) {
-          setItems([]);
-          setLoading(false);
-          return;
+          return [];
         }
-
         query = query.in('id', ids);
       }
 
-      const { data, error } = await query;
+      const { data, error } = await query.range(from, to);
       if (error) throw error;
 
-      const mapped: SavedItem[] = (data ?? []).map((row: any) => ({
+      return (data ?? []).map((row: any) => ({
         ...row,
-        tags: row.saved_item_tags
-          ?.map((link: any) => link.tag)
-          .filter(Boolean) ?? [],
+        tags: row.saved_item_tags?.map((link: any) => link.tag).filter(Boolean) ?? [],
       }));
+    },
+    [primaryFilter, search, session, tagId],
+  );
 
-      setItems(mapped);
+  const loadInitial = useCallback(
+    async (mode: 'initial' | 'refresh' = 'initial') => {
+      if (!session) return;
+      setError(null);
+      if (mode === 'refresh') {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      try {
+        const results = await querySavedItems(0, PAGE_SIZE - 1);
+        setItems(results);
+        setOffset(results.length);
+        setHasMore(results.length === PAGE_SIZE);
+      } catch (err: any) {
+        console.error('Failed to fetch items', err.message);
+        setError(err.message ?? 'Unknown error');
+      } finally {
+        if (mode === 'refresh') {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [querySavedItems, session],
+  );
+
+  const loadMore = useCallback(async () => {
+    if (!session || !hasMore || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+
+    try {
+      const from = offset;
+      const to = from + PAGE_SIZE - 1;
+      const results = await querySavedItems(from, to);
+      setItems((prev) => {
+        const merged = new Map(prev.map((item) => [item.id, item]));
+        results.forEach((item) => merged.set(item.id, item));
+        return Array.from(merged.values()).sort((a, b) =>
+          a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0,
+        );
+      });
+      setOffset(from + results.length);
+      setHasMore(results.length === PAGE_SIZE);
     } catch (err: any) {
       console.error('Failed to fetch items', err.message);
-      setError(err.message);
+      setError(err.message ?? 'Unknown error');
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
-  }, [primaryFilter, search, session, tagId]);
+  }, [hasMore, loadingMore, offset, querySavedItems, session]);
 
   useEffect(() => {
-    if (autoFetch) {
-      fetchItems();
-    }
-  }, [autoFetch, fetchItems]);
+    if (!autoFetch) return;
+    setOffset(0);
+    setHasMore(true);
+    loadInitial('initial');
+  }, [autoFetch, loadInitial]);
 
   useEffect(() => {
     if (!autoFetch || !session) return;
@@ -162,15 +207,15 @@ export function useItems(options: UseItemsOptions = {}) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'saved_items', filter: `user_id=eq.${session.user.id}` },
         () => {
-          fetchItems();
-        }
+          loadInitial('initial');
+        },
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [autoFetch, fetchItems, session]);
+  }, [autoFetch, loadInitial, session]);
 
   const createItem = useCallback(
     async (payload: SavedItemInput) => {
@@ -184,59 +229,64 @@ export function useItems(options: UseItemsOptions = {}) {
 
       if (error) throw error;
       await syncItemTags(data.id, tagNames);
-      await fetchItems();
+      await loadInitial('initial');
     },
-    [fetchItems, session, syncItemTags]
+    [loadInitial, session, syncItemTags],
   );
 
   const updateItem = useCallback(
     async (itemId: string, updates: UpdateSavedItemInput) => {
       const { tag_names: tagNames, ...rest } = updates;
-      const { error } = await supabase
-        .from('saved_items')
-        .update(rest)
-        .eq('id', itemId);
+      const { error } = await supabase.from('saved_items').update(rest).eq('id', itemId);
 
       if (error) throw error;
       if (tagNames) {
         await syncItemTags(itemId, tagNames);
       }
-      await fetchItems();
+      await loadInitial('initial');
     },
-    [fetchItems, syncItemTags]
+    [loadInitial, syncItemTags],
   );
 
   const deleteItem = useCallback(
     async (itemId: string) => {
-      const { error } = await supabase
-        .from('saved_items')
-        .delete()
-        .eq('id', itemId);
+      const { error } = await supabase.from('saved_items').delete().eq('id', itemId);
       if (error) throw error;
-      await fetchItems();
+      await loadInitial('initial');
     },
-    [fetchItems]
+    [loadInitial],
   );
 
   const toggleFavorite = useCallback(
     async (itemId: string, isFavorite: boolean) => {
       await updateItem(itemId, { is_favorite: isFavorite });
     },
-    [updateItem]
+    [updateItem],
   );
 
   const toggleArchive = useCallback(
     async (itemId: string, isArchived: boolean) => {
       await updateItem(itemId, { is_archived: isArchived });
     },
-    [updateItem]
+    [updateItem],
+  );
+
+  const status = useMemo(
+    () => ({
+      items,
+      loading,
+      loadingMore,
+      refreshing,
+      error,
+      hasMore,
+    }),
+    [error, hasMore, items, loading, loadingMore, refreshing],
   );
 
   return {
-    items,
-    loading,
-    error,
-    refetch: fetchItems,
+    ...status,
+    refetch: () => loadInitial('refresh'),
+    loadMore,
     createItem,
     updateItem,
     deleteItem,

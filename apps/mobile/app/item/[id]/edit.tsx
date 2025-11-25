@@ -1,28 +1,74 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+} from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { TextInput } from '@/components/TextInput';
 import { Button } from '@/components/Button';
 import { TagSelector } from '@/components/TagSelector';
 import { useItems } from '@/hooks/useItems';
-import { useShareStore } from '@/store/shareStore';
 import { useTags } from '@/hooks/useTags';
-import { extractSourceApp } from '@/utils/share';
+import { supabase } from '@/lib/supabase';
+import type { SavedItem } from '@/types';
 import { isValidUrl } from '@/utils/url';
 
-export default function AddItemScreen() {
-  const { createItem } = useItems({ autoFetch: false });
+export default function EditItemScreen() {
+  const params = useLocalSearchParams();
+  const itemId = params.id as string;
+  const { updateItem } = useItems({ autoFetch: false });
   const { tags: availableTags } = useTags();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [sourceApp, setSourceApp] = useState('');
-  const [saving, setSaving] = useState(false);
-  const sharePayload = useShareStore((state) => state.pendingShare);
-  const clearPendingShare = useShareStore((state) => state.clearPendingShare);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  const fetchItem = useCallback(async () => {
+    if (!itemId) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('saved_items')
+      .select('*, saved_item_tags(tag:tags(*))')
+      .eq('id', itemId)
+      .single();
+
+    if (error || !data) {
+      Alert.alert('Unable to load item', error?.message ?? 'Item not found', [
+        {
+          text: 'OK',
+          onPress: () => router.back(),
+        },
+      ]);
+      return;
+    }
+
+    const typed = data as SavedItem & { saved_item_tags?: { tag?: { name: string } }[] };
+
+    setUrl(typed.url ?? '');
+    setTitle(typed.title ?? '');
+    setNotes(typed.notes ?? '');
+    setSourceApp(typed.source_app ?? '');
+    setSelectedTags(
+      typed.saved_item_tags?.map((link) => link.tag?.name).filter((name): name is string => Boolean(name)) ?? [],
+    );
+    setLoading(false);
+  }, [itemId]);
+
+  useEffect(() => {
+    fetchItem();
+  }, [fetchItem]);
 
   const handleSave = async () => {
+    if (!itemId) return;
     const trimmedUrl = url.trim();
     if (!trimmedUrl || !isValidUrl(trimmedUrl)) {
       Alert.alert('Invalid URL', 'Enter a valid URL that includes http or https.');
@@ -31,58 +77,28 @@ export default function AddItemScreen() {
 
     try {
       setSaving(true);
-      await createItem({
+      await updateItem(itemId, {
         url: trimmedUrl,
         title: title.trim() || undefined,
         notes: notes.trim() || undefined,
         tag_names: selectedTags,
         source_app: sourceApp.trim() || undefined,
       });
-      clearPendingShare();
       router.back();
     } catch (error: any) {
-      Alert.alert('Unable to save item', error.message ?? 'Unknown error');
+      Alert.alert('Update failed', error.message ?? 'Unknown error');
     } finally {
       setSaving(false);
     }
   };
 
-  useEffect(() => {
-    if (!sharePayload) {
-      return;
-    }
-
-    if (!url && sharePayload.url) {
-      setUrl(sharePayload.url);
-    }
-
-    const maybeTitle =
-      sharePayload.extraData && typeof (sharePayload.extraData as Record<string, unknown>).title === 'string'
-        ? (sharePayload.extraData as Record<string, string>).title
-        : undefined;
-    if (!title && maybeTitle) {
-      setTitle(maybeTitle);
-    }
-
-    if (!notes && sharePayload.rawText) {
-      setNotes(sharePayload.rawText);
-    }
-
-    if (!sourceApp) {
-      const detected = extractSourceApp(sharePayload.extraData ?? undefined);
-      if (detected) {
-        setSourceApp(detected);
-      }
-    }
-  }, [notes, sharePayload, sourceApp, title, url]);
-
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        clearPendingShare();
-      };
-    }, [clearPendingShare]),
-  );
+  if (loading) {
+    return (
+      <ScrollView contentContainerStyle={styles.loader}>
+        <ActivityIndicator size="large" />
+      </ScrollView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -91,8 +107,8 @@ export default function AddItemScreen() {
       keyboardVerticalOffset={80}
     >
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Save Link</Text>
-        <TextInput label="URL" autoCapitalize="none" value={url} onChangeText={setUrl} />
+        <Text style={styles.title}>Edit Saved Item</Text>
+        <TextInput label="URL" value={url} autoCapitalize="none" onChangeText={setUrl} />
         <TextInput label="Title" value={title} onChangeText={setTitle} />
         <TextInput
           label="Notes"
@@ -113,7 +129,7 @@ export default function AddItemScreen() {
           onChangeText={setSourceApp}
           placeholder="Optional - e.g. Safari, Chrome"
         />
-        <Button label="Save" onPress={handleSave} loading={saving} style={{ marginTop: 16 }} />
+        <Button label="Save changes" onPress={handleSave} loading={saving} style={{ marginTop: 16 }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -122,6 +138,12 @@ export default function AddItemScreen() {
 const styles = StyleSheet.create({
   container: {
     padding: 16,
+  },
+  loader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
   },
   title: {
     fontSize: 24,
