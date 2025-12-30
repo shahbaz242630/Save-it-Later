@@ -14,6 +14,7 @@ interface Props {
 export function ItemCard({ item, onPress, onToggleFavorite, onToggleArchive }: Props) {
   const timeAgo = formatDistanceToNow(new Date(item.created_at), { addSuffix: true });
   const domain = (() => {
+    if (item.domain) return item.domain;
     try {
       const url = new URL(item.url);
       return url.host.replace('www.', '');

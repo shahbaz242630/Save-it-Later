@@ -1,0 +1,304 @@
+# Save-It-Later — BRD v1.1 (Agent-Ready, Codex-Friendly)
+
+> Goal: Upgrade the existing v1 BRD so the product stays **simple** while becoming **agent/automation-ready** for Phase 3.
+>
+> This document is written to be **Codex-friendly**: clear scope, step-by-step tasks, minimal ambiguity.
+
+---
+
+## 0) Quick Definitions
+
+* **Capture**: user shares a URL into the app (share sheet) or manually pastes a URL.
+* **Normalize**: validate/clean URL + extract basic fields (domain, title fallback).
+* **Persist**: store the minimal item quickly so the user is never blocked.
+* **Enrich** (future): optional background steps (metadata fetch, summaries, auto-tags).
+* **Agent Mode (future)**: the system runs a small pipeline of tools after saving.
+
+---
+
+## 1) Product Summary (v1 stays the same)
+
+Save-It-Later is a cross-platform bookmarking app to save links/posts/content from any app into a single inbox.
+
+**v1 (current):**
+
+* Save via share menu (Android now; iOS extension later)
+* Tags + notes
+* Search + filters (All/Favorites/Archived)
+
+**v1.1 (this doc):**
+
+* No new user-facing features required
+* Add **architecture readiness** for future enrichment/agent features
+
+---
+
+## 2) Goals
+
+### 2.1 v1 Goals (unchanged)
+
+* One-tap saving
+* Clean list, search, tags
+* Simple archive + favorites
+
+### 2.2 v1.1 Goals (new)
+
+* Introduce a **Save Pipeline** concept to keep logic modular.
+* Add minimal fields needed to support **async enrichment later**.
+* Ensure app code remains organized: UI ≠ business logic ≠ enrichment.
+
+---
+
+## 3) Non-Goals (keep scope small)
+
+* No AI summaries or auto-tagging in v1.1
+* No chat UI
+* No "ask my links" feature
+* No complex offline conflict resolution
+
+---
+
+## 4) Functional Requirements (v1 unchanged)
+
+All existing v1 requirements remain valid:
+
+* Auth (email/password)
+* Save items (manual + share)
+* Tags
+* Search
+* Favorites + archive
+
+---
+
+## 5) NEW: Save Pipeline (Conceptual Spec)
+
+**Core rule:** Saving must be fast; enrichment must never block saving.
+
+### 5.1 Pipeline Stages
+
+1. **Capture**
+
+   * Input: URL (required) + optional text/title + optional source app
+   * Source: Share sheet OR manual Add screen
+
+2. **Normalize**
+
+   * Validate URL format
+   * Sanitize shared text → extract URL
+   * Extract domain
+   * Title fallback (if no title: use domain or URL)
+
+3. **Persist (Fast Save)**
+
+   * Create record in `saved_items`
+   * Attach tags (if provided)
+   * Return success immediately
+
+4. **Enrich (Future, optional)**
+
+   * Fetch metadata (page title, favicon, OG image)
+   * Generate summary
+   * Suggest tags
+   * Update record fields
+
+### 5.2 V1.1 Acceptance
+
+* App must implement Capture→Normalize→Persist cleanly (already mostly done).
+* Enrich step is defined and *prepared for*, but may be a no-op.
+
+---
+
+## 6) Schema Updates (Minimal, Future-Proof)
+
+### 6.1 Add fields to `saved_items`
+
+Add the following columns (safe defaults, do not change UX):
+
+* `domain` (text, nullable)
+* `favicon_url` (text, nullable)
+* `preview_image_url` (text, nullable)
+* `summary` (text, nullable)
+* `processing_status` (text, default `'complete'`)
+  Values later: `pending`, `processing`, `complete`, `failed`
+* `processing_error` (text, nullable)
+* `last_enriched_at` (timestamptz, nullable)
+
+**Important:** In v1.1, most of these remain null.
+
+### 6.2 Index suggestions (optional)
+
+* Index `domain`
+* Keep existing full-text search index.
+
+---
+
+## 7) NEW: Agent/Automation Readiness Requirements (Non-Functional)
+
+### 7.1 Separation of Concerns
+
+* UI screens must not contain enrichment or pipeline logic.
+* Pipeline logic must live in dedicated modules.
+
+### 7.2 Tool-based Architecture (Future)
+
+Define future tools (functions) as independent modules:
+
+* `normalizeUrl()`
+* `extractDomain()`
+* `fetchMetadata()`
+* `suggestTags()`
+* `summarizeContent()`
+
+Each tool must be:
+
+* small
+* testable
+* no UI dependencies
+
+### 7.3 Background Processing (Future)
+
+* Enrichment runs after save.
+* If enrichment fails, item still exists.
+* Failures should not crash UI.
+
+---
+
+## 8) Codex-Friendly Implementation Plan (Step-by-Step)
+
+> This is the exact sequence Codex should follow to upgrade safely.
+
+### Step 1 — Add DB columns (Supabase)
+
+**Task:** Create a SQL migration that alters `saved_items`.
+
+* Add the columns in Section 6.1
+* Ensure defaults are safe
+* Verify RLS policies still work
+
+**Acceptance:**
+
+* Existing app features still work
+* Old records load without errors
+
+### Step 2 — Update TypeScript types
+
+**Task:** Update the `SavedItem` type to include new fields.
+
+* Add optional fields: `domain`, `favicon_url`, `summary`, etc.
+
+**Acceptance:**
+
+* TypeScript compiles
+* Screens render
+
+### Step 3 — Implement a `savePipeline` module
+
+**Task:** Create `src/pipeline/savePipeline.ts` that exposes:
+
+* `captureAndSave(payload)`
+
+Internally calls:
+
+1. normalize
+2. persist
+3. enqueue enrich (no-op for now)
+
+**Acceptance:**
+
+* Manual add uses the pipeline
+* ShareReceiver uses the pipeline
+
+### Step 4 — Move normalization into `src/tools/normalizeUrl.ts`
+
+**Task:** Create a pure function module that:
+
+* Extracts URL from shared text
+* Sanitizes trailing punctuation
+* Validates URL
+* Extracts domain
+
+**Acceptance:**
+
+* Works for common share payloads
+
+### Step 5 — Prepare enrichment stub (no-op)
+
+**Task:** Add `src/enrich/enrichItem.ts`.
+
+* For v1.1, function returns immediately.
+* It should be callable later without refactor.
+
+**Acceptance:**
+
+* No user-facing behavior changes
+
+### Step 6 — UI improvements (optional, minimal)
+
+**Task:** Show domain in item cards if available.
+
+* If domain missing, fallback to parsing from URL.
+
+**Acceptance:**
+
+* Same UX, slightly better display
+
+---
+
+## 9) v1.1 Acceptance Criteria
+
+1. Existing v1 features still work (auth, save, list, tags, search, favorites, archive).
+2. `saved_items` table has new fields with safe defaults.
+3. Manual save and share save both go through a single `savePipeline` entry.
+4. No enrichment is required, but codebase is ready to add it.
+
+---
+
+## 10) Future Phase 3 (Agent Mode) — Scope Outline Only
+
+When ready, enable enrichment by implementing:
+
+* `fetchMetadata()` → sets `title/domain/favicon_url/preview_image_url`
+* `summarizeContent()` → sets `summary`
+* `suggestTags()` → updates tag associations
+
+Add a setting:
+
+* `Enable Smart Enrichment (Pro)`
+
+Add cost controls:
+
+* per-user monthly limit
+* show usage in settings
+
+---
+
+## 11) Recommended Project Structure (Agent-Ready)
+
+```text
+apps/mobile/
+  app/
+    ... (screens)
+  src/
+    components/
+    hooks/
+    lib/
+    store/
+    tools/
+      normalizeUrl.ts
+      extractDomain.ts
+    pipeline/
+      savePipeline.ts
+    enrich/
+      enrichItem.ts
+    types/
+```
+
+---
+
+## 12) Notes for Codex
+
+* Do not change UX in v1.1.
+* Do not add AI calls.
+* Keep modules small and testable.
+* Prefer pure functions for tools.
+* Centralize saving into the pipeline so future features don’t spread across screens.

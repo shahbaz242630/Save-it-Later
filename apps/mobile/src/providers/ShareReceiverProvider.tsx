@@ -1,158 +1,109 @@
-import { PropsWithChildren, useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, ToastAndroid } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert } from 'react-native';
+import ShareMenu from 'react-native-share-menu';
 import { router, useRootNavigationState } from 'expo-router';
+
 import { useAuthStore } from '@/store/authStore';
 import { useShareStore } from '@/store/shareStore';
-import { useItems } from '@/hooks/useItems';
 import { extractSourceApp } from '@/utils/share';
-import { isValidUrl } from '@/utils/url';
+import { captureAndSave } from '@/pipeline/savePipeline';
 
-type SharedItem = {
+type SharePayload = {
+  data?: string;
   mimeType?: string;
-  data?: unknown;
-  extraData?: Record<string, unknown>;
+  extraData?: Record<string, any>;
 };
 
-const URL_REGEX = /(https?:\/\/[^\s<>"']+)/i;
+function deriveTitleFromShare(rawText: string): string | undefined {
+  const lines = rawText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l): l is string => Boolean(l)); // strict TS-safe
 
-const normalizeSharedItem = (item?: SharedItem | null) => {
-  if (!item) return null;
+  if (!lines.length) return undefined;
 
-  const maybeData = item.data;
-  let payloadText: string | undefined;
+  const first = lines[0];
+  if (first.startsWith('http://') || first.startsWith('https://')) return undefined;
 
-  if (typeof maybeData === 'string') {
-    payloadText = maybeData.trim();
-  } else if (Array.isArray(maybeData)) {
-    const first = maybeData.find((value) => typeof value === 'string');
-    payloadText = typeof first === 'string' ? first.trim() : undefined;
-  } else if (typeof maybeData === 'object' && maybeData !== null) {
-    const maybeString = Reflect.get(maybeData, 'value');
-    if (typeof maybeString === 'string') {
-      payloadText = maybeString.trim();
-    }
-  }
+  return first.length > 140 ? first.slice(0, 140) : first;
+}
 
-  if (!payloadText?.length) {
-    return null;
-  }
-
-  const rawMatch = payloadText.match(URL_REGEX);
-  const sanitizedUrl = rawMatch?.[0]?.replace(/[)\],.>]+$/, '');
-
-  return {
-    url: sanitizedUrl,
-    rawText: payloadText,
-    mimeType: item.mimeType ?? 'text/plain',
-    extraData: typeof item.extraData === 'object' && item.extraData !== null ? item.extraData : null,
-    receivedAt: Date.now(),
-  };
-};
-
-export function ShareReceiverProvider({ children }: PropsWithChildren) {
-  const setPendingShare = useShareStore((state) => state.setPendingShare);
+export function ShareReceiverProvider({ children }: { children: React.ReactNode }) {
   const pendingShare = useShareStore((state) => state.pendingShare);
+  const setPendingShare = useShareStore((state) => state.setPendingShare);
   const clearPendingShare = useShareStore((state) => state.clearPendingShare);
+
   const session = useAuthStore((state) => state.session);
   const loadingAuth = useAuthStore((state) => state.loading);
+
   const navigationState = useRootNavigationState();
-  const { createItem } = useItems({ autoFetch: false });
   const [savingShare, setSavingShare] = useState(false);
 
-  const handleShare = useCallback(
-    (sharedItem?: SharedItem | null) => {
-      if (!sharedItem) {
-        return;
-      }
-
-      const normalized = normalizeSharedItem(sharedItem);
-
-      if (!normalized) {
-        Alert.alert('Unsupported share', 'Only text or URLs can be saved right now.');
-        return;
-      }
-
-      setPendingShare(normalized);
-    },
-    [setPendingShare],
-  );
-
+  // 1) Listen for incoming shares (Android via react-native-share-menu)
   useEffect(() => {
-    if (Platform.OS === 'web') {
-      return;
-    }
+    const handleShare = (share: SharePayload) => {
+      const rawText = share?.data?.toString?.() ?? '';
+      if (!rawText) return;
 
-    let mounted = true;
-    let listener: { remove: () => void } | null = null;
-
-    const attachShareListeners = async () => {
-      const shareModule = await import('react-native-share-menu');
-      if (!mounted) return;
-
-      const ShareMenu = shareModule.default ?? shareModule;
-      ShareMenu.getInitialShare(handleShare);
-      listener = ShareMenu.addNewShareListener(handleShare);
+      setPendingShare({
+        rawText,
+        extraData: share?.extraData ?? null,
+        receivedAt: Date.now(),
+      });
     };
 
-    attachShareListeners();
+    // Share while app is open
+    const listener = (ShareMenu as any).addNewShareListener(handleShare);
+
+    // Share when app launches from a share
+    (ShareMenu as any).getInitialShare(handleShare);
 
     return () => {
-      mounted = false;
       listener?.remove?.();
     };
-  }, [handleShare]);
+  }, [setPendingShare]);
 
+  // 2) When we have a pending share, quick-save if authenticated
   useEffect(() => {
-    if (!pendingShare || loadingAuth || !navigationState?.key || savingShare) {
-      return;
-    }
+    if (!navigationState?.key) return;
+    if (savingShare) return;
+    const rawText = pendingShare?.rawText;
+    if (!rawText) return;
+    if (loadingAuth) return;
 
+    // Not logged in -> send user to Add Item screen (same v1 behavior)
     if (!session) {
-      router.navigate('/(auth)/login');
+      router.push('/add-item');
       return;
     }
 
-    if (!pendingShare.url || !isValidUrl(pendingShare.url)) {
-      Alert.alert('Unsupported share', 'Shared content did not include a valid URL.');
-      clearPendingShare();
-      return;
-    }
-
-    const runQuickSave = async () => {
+    const run = async () => {
       try {
         setSavingShare(true);
-        const detectedSource = extractSourceApp(pendingShare.extraData ?? undefined);
-        const derivedTitle =
-          pendingShare.extraData && typeof (pendingShare.extraData as Record<string, unknown>).title === 'string'
-            ? ((pendingShare.extraData as Record<string, string>).title ?? '').trim() || undefined
-            : undefined;
-        const normalizedNotes =
-          pendingShare.rawText && pendingShare.rawText !== pendingShare.url ? pendingShare.rawText : undefined;
 
-        await createItem({
-          url: pendingShare.url,
+        const detectedSource = extractSourceApp(pendingShare.extraData);
+        const derivedTitle = deriveTitleFromShare(rawText);
+
+        // IMPORTANT: pass `text` (not `rawText`) to match your CapturePayload
+        await captureAndSave({
+          text: rawText,
           title: derivedTitle,
-          notes: normalizedNotes,
+          notes: undefined,
           source_app: detectedSource,
         });
 
-        if (Platform.OS === 'android') {
-          ToastAndroid.show('Saved to Save-It-Later', ToastAndroid.SHORT);
-        } else {
-          Alert.alert('Saved', 'Link saved to Save-It-Later.');
-        }
-
         clearPendingShare();
-        router.replace('/(tabs)/home');
-      } catch (error: any) {
-        Alert.alert('Unable to save shared item', error?.message ?? 'Unknown error');
+      } catch (e: any) {
+        Alert.alert('Could not save link', e?.message ?? 'Please try again.');
+        // Fall back to manual flow with the pending share still available
+        router.push('/add-item');
       } finally {
         setSavingShare(false);
       }
     };
 
-    runQuickSave();
-  }, [clearPendingShare, createItem, loadingAuth, navigationState?.key, pendingShare, savingShare, session]);
+    run();
+  }, [clearPendingShare, loadingAuth, navigationState?.key, pendingShare, savingShare, session]);
 
-  return children;
+  return <>{children}</>;
 }

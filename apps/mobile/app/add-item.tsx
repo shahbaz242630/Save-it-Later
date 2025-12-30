@@ -8,7 +8,8 @@ import { useItems } from '@/hooks/useItems';
 import { useShareStore } from '@/store/shareStore';
 import { useTags } from '@/hooks/useTags';
 import { extractSourceApp } from '@/utils/share';
-import { isValidUrl } from '@/utils/url';
+import { captureAndSave } from '@/pipeline/savePipeline';
+import { normalizeUrl } from '@/tools/normalizeUrl';
 
 export default function AddItemScreen() {
   const { createItem } = useItems({ autoFetch: false });
@@ -24,20 +25,24 @@ export default function AddItemScreen() {
 
   const handleSave = async () => {
     const trimmedUrl = url.trim();
-    if (!trimmedUrl || !isValidUrl(trimmedUrl)) {
+    const normalized = normalizeUrl({ url: trimmedUrl });
+    if (!trimmedUrl || !normalized) {
       Alert.alert('Invalid URL', 'Enter a valid URL that includes http or https.');
       return;
     }
 
     try {
       setSaving(true);
-      await createItem({
-        url: trimmedUrl,
-        title: title.trim() || undefined,
-        notes: notes.trim() || undefined,
-        tag_names: selectedTags,
-        source_app: sourceApp.trim() || undefined,
-      });
+      await captureAndSave(
+        {
+          url: normalized.url,
+          title,
+          notes,
+          tag_names: selectedTags,
+          source_app: sourceApp,
+        },
+        createItem,
+      );
       clearPendingShare();
       router.back();
     } catch (error: any) {

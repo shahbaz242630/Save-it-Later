@@ -38,6 +38,6 @@ yarn-error.*
 
 app-example
 
-# generated native folders
+# Generated native folders (kept out of VCS)
 /ios
 /android

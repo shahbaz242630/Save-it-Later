@@ -11,12 +11,20 @@ create table if not exists public.saved_items (
   title text,
   notes text,
   source_app text,
+  domain text,
+  favicon_url text,
+  preview_image_url text,
+  summary text,
+  processing_status text default 'complete',
+  processing_error text,
+  last_enriched_at timestamptz,
   is_favorite boolean default false,
   is_archived boolean default false,
   created_at timestamptz default now()
 );
 
 create index if not exists saved_items_user_created_idx on public.saved_items (user_id, created_at desc);
+create index if not exists saved_items_domain_idx on public.saved_items (domain);
 create index if not exists saved_items_search_idx on public.saved_items using gin (
   to_tsvector('english', coalesce(title,'') || ' ' || coalesce(notes,''))
 );

@@ -9,9 +9,25 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.saveitlater.app",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.saveitlater.app"
+        ]
+      },
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "saveitlater"
+            ]
+          }
+        ]
+      }
     },
     "android": {
+      "package": "com.saveitlater.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
